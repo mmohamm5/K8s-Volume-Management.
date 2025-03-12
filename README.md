@@ -114,3 +114,134 @@ There are four access modes:
 - ReadWriteOncePod (read-write by a single pod).
   
 The optional volume modes, filesystem or block device, allow volumes to be mounted into a pod's directory or as a raw block device respectively. By design Kubernetes does not support object storage, but it can be implemented with the help of custom resource types. Once a suitable PersistentVolume is found, it is bound to a PersistentVolumeClaim. 
+
+![pic](asset/3.png)
+
+After a successful bound, the PersistentVolumeClaim resource can be used by the containers of the Pod.
+
+![pic](asset/4.png)
+
+Once a user finishes its work, the attached PersistentVolumes can be released. The underlying PersistentVolumes can then be reclaimed (for an admin to verify and/or aggregate data), deleted (both data and volume are deleted), or recycled for future usage (only data is deleted), based on the configured persistentVolumeReclaimPolicy property. 
+
+To learn more, you can check out the PersistentVolumeClaims.
+
+## Using a Shared hostPath Volume Type Demo Guide
+
+This exercise guide was prepared for the demonstration available at the end of this blog. It includes a Deployment definition manifest that can be used as a template to define other similar objects as needed. In addition to the ephemeral volume and the volume mounts specified for each container, a command stanza allows us to define a series of desired commands expected to run in one of the containers. The debian container's shell command line interpreter (sh) is invoked to run the echo and sleep commands (-c).
+
+We demonstrate how to use a hostPath volume as a shared storage between the two containers of a pod. we've already configured a deployment.
+
+```bash
+$ vim app-blue-shared-vol.yaml
+```
+
+The deployment runs a pod. And the pod is configured with two containers and a shared volume.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: blue-app
+  name: blue-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blue-app
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: blue-app
+        type: canary
+    spec:
+      volumes:
+      - name: host-volume
+        hostPath:
+          path: /home/docker/blue-shared-volume
+      containers:
+      - image: nginx
+        name: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /usr/share/nginx/html
+          name: host-volume
+      - image: debian
+        name: debian
+        volumeMounts:
+        - mountPath: /host-vol
+          name: host-volume
+        command: ["/bin/sh", "-c", "echo Welcome to BLUE App! > /host-vol/index.html ; sleep infinity"]
+status: {}
+```
+
+So the deployment operator is called the blue-app. We will be using this to also generate later a green-app deployment. But if we're scrolling down to the spec section of the pod template right down here, we see that a volume has been defined: hostPath type.
+
+Two containers are defined, an "nginx" and a "debian" container. Both containers have mountPath directories but they're both mounting the same host-volume, host-volume, volume defined at the top here.
+
+So one volume defined, two containers, both mounting the same volume. Now, in addition the "debian" container is going to run a few commands.
+
+first it will create a file index.html in its own host-volume directory.
+
+And in that file, it will write some text, "Welcome to BLUE App!". And then it will go to sleep indefinitely.
+
+Otherwise the "debian" container would terminate and we don't want that at least not as of yet.
+
+So now let's try to deploy this.
+
+```bash
+kubectl apply -f app-blue-shared-vol.yaml
+```
+
+But at the same time, we want to expose this deployment via a NodePort type service. The nginx web server of the deployment is already exposing port 80.
+
+```bash
+kubectl expose deployment blue-app --type=NodePort
+```
+
+So all we have to do is expose the deployment and specify that we want the NodePort type of service.
+
+```bash
+kubectl get deploy,po,svc
+```
+
+We can validate that our resources have been created.
+
+![pic](asset/5.png)
+
+So the deployment is up and running with one pod replica. The pod, the blue-app pod, is up and running with both containers ready, the "nginx" container and the "debian" container as well.
+
+And then the service "blue-app" has been created and it is a NodePort type service. So now, we can use the 'minikube service list to display the URL of the NodePort type service.
+
+```bash
+minikube service list
+```
+
+So either from the command line, we could run curl and paste the URL, and here it is, we have "Welcome to BLUE App!".
+
+```bash
+curl http://192.168.59.110:30704
+#Output will show like ..
+Welcome to BLUE App!
+```
+
+And if we keep refreshing, we will consistently get the same response.
+
+Now, if we want to do this in a browser, we can right-click on this link, open link and this will open a tab in our favorite browser.
+
+So for now we've only set up the blue-app, but as homework I would invite you to set up a green-ap, pretty much the same way.
+
+Have a deployment called the green-app configure it in such manner that the "debian" container modifies the index.html file of  your web server by using a shared volume.
+
+So by basically using the same pattern, we can easily configure a new application which should be the green-app. And then later we are going to play with services and deployments for a Canary type of,deployment pattern.
+
+So it's a very simple deployment.What is important is to make sure that in the template of the pod, we have a volume defined and then the two containers, they're both mounting the same volume.
+
+Otherwise they cannot share it.
+
+Otherwise the "debian" container cannot override the index.html file, which is the home of the nginx web server.
+
